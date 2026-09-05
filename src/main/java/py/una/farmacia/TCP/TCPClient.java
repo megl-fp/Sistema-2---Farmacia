@@ -2,6 +2,8 @@ package py.una.farmacia.TCP;
 
 import java.io.*;
 import java.net.*;
+
+import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 
@@ -29,7 +31,7 @@ public class TCPClient {
             boolean ejecutar = true;
 
             while (ejecutar) {
-                System.out.println("\n=== FARMACIA - VALIDACIÓN TCP DE RECETAS ===");
+                System.out.println("\n=== FARMACIA - VALIDACION TCP DE RECETAS ===");
                 System.out.println("1. Validar Receta de Paciente");
                 System.out.println("2. Cerrar Conexión (Bye)");
                 System.out.println("3. Apagar Servidor Remoto (Terminar todo)");
@@ -64,12 +66,30 @@ public class TCPClient {
                             try {
                                 JSONObject jsonRespuesta = (JSONObject) parser.parse(mensajeServidor);
                                 Boolean valido = (Boolean) jsonRespuesta.get("valido");
-                                String mensaje = (String) jsonRespuesta.get("mensaje");
 
                                 System.out.println("\n----------------------------------------");
-                                System.out.println(" Resultado de Validación: " + (Boolean.TRUE.equals(valido) ? "APROBADO" : "RECHAZADO"));
-                                System.out.println(" Detalle: " + mensaje);
+                                if (Boolean.TRUE.equals(valido)) {
+                                    String paciente = (String) jsonRespuesta.get("paciente");
+                                    JSONArray medicamentos = (JSONArray) jsonRespuesta.get("medicamentos");
+
+                                    System.out.println("Resultado de validacion: APROBADO");
+                                    System.out.println("Receta autorizada para: " + paciente);
+                                    System.out.println("Detalle:");
+                                    
+                                    if (medicamentos != null && !medicamentos.isEmpty()) {
+                                        for (Object med : medicamentos) {
+                                            System.out.println("  * " + med);
+                                        }
+                                    } else {
+                                        System.out.println("  (Sin remedios especificados)");
+                                    }
+                                } else {
+                                    String mensaje = (String) jsonRespuesta.get("mensaje");
+                                    System.out.println("Resultado de validacion: RECHAZADO");
+                                    System.out.println("Detalle: " + mensaje);
+                                }
                                 System.out.println("----------------------------------------");
+
                             } catch (Exception e) {
                                 System.out.println("Respuesta del servidor: " + mensajeServidor);
                             }
