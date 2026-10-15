@@ -1,125 +1,69 @@
 package py.una.farmacia.TCP;
-
 import java.io.*;
 import java.net.*;
-
-import org.json.simple.JSONArray;
-import org.json.simple.JSONObject;
+import java.nio.charset.StandardCharsets;
+import org.json.simple.*;
 import org.json.simple.parser.JSONParser;
-
+import py.una.farmacia.UDP.UDPClient;
+@SuppressWarnings("unchecked")
 public class TCPClient {
-
-    @SuppressWarnings("unchecked")
-    public static void main(String[] args) throws IOException {
-        String host = "localhost";
-        int puerto = 4444;
-
-        System.out.println("Conectando con el Servidor TCP de la Clínica...");
-
-        try (
-            Socket socket = new Socket(host, puerto);
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            BufferedReader stdIn = new BufferedReader(new InputStreamReader(System.in))
-        ) {
-            JSONParser parser = new JSONParser();
-
-            // Leer mensaje de bienvenida inicial enviado por TCPServerHilo ("Bienvenido!")
-            String mensajeServidor = in.readLine();
-            System.out.println("Servidor: " + mensajeServidor);
-
-            boolean ejecutar = true;
-
-            while (ejecutar) {
-                System.out.println("\n=== FARMACIA - VALIDACION TCP DE RECETAS ===");
-                System.out.println("1. Validar Receta de Paciente");
-                System.out.println("2. Cerrar Conexión (Bye)");
-                System.out.println("3. Apagar Servidor Remoto (Terminar todo)");
-                System.out.print("Seleccione una opción: ");
-
-                String opcion = stdIn.readLine();
-                if (opcion == null) break;
-
-                switch (opcion) {
-                    case "1":
-                        System.out.print("Ingrese la Cédula del Paciente: ");
-                        String cedulaStr = stdIn.readLine();
-
-                        Long cedula;
-                        try {
-                            cedula = Long.parseLong(cedulaStr);
-                        } catch (NumberFormatException e) {
-                            System.out.println("La cédula ingresada debe ser numérica.");
-                            continue;
-                        }
-
-                        // Armar JSON de validación
-                        JSONObject jsonPeticion = new JSONObject();
-                        jsonPeticion.put("operacion", "validar");
-                        jsonPeticion.put("cedula", cedula);
-
-                        out.println(jsonPeticion.toJSONString());
-
-                        // Procesar respuesta
-                        mensajeServidor = in.readLine();
-                        if (mensajeServidor != null) {
-                            try {
-                                JSONObject jsonRespuesta = (JSONObject) parser.parse(mensajeServidor);
-                                Boolean valido = (Boolean) jsonRespuesta.get("valido");
-
-                                System.out.println("\n----------------------------------------");
-                                if (Boolean.TRUE.equals(valido)) {
-                                    String paciente = (String) jsonRespuesta.get("paciente");
-                                    JSONArray medicamentos = (JSONArray) jsonRespuesta.get("medicamentos");
-
-                                    System.out.println("Resultado de validacion: APROBADO");
-                                    System.out.println("Receta autorizada para: " + paciente);
-                                    System.out.println("Detalle:");
-                                    
-                                    if (medicamentos != null && !medicamentos.isEmpty()) {
-                                        for (Object med : medicamentos) {
-                                            System.out.println("  * " + med);
-                                        }
-                                    } else {
-                                        System.out.println("  (Sin remedios especificados)");
-                                    }
-                                } else {
-                                    String mensaje = (String) jsonRespuesta.get("mensaje");
-                                    System.out.println("Resultado de validacion: RECHAZADO");
-                                    System.out.println("Detalle: " + mensaje);
-                                }
-                                System.out.println("----------------------------------------");
-
-                            } catch (Exception e) {
-                                System.out.println("Respuesta del servidor: " + mensajeServidor);
-                            }
-                        }
-                        break;
-
-                    case "2":
-                        out.println("Bye");
-                        mensajeServidor = in.readLine();
-                        System.out.println("Servidor: " + mensajeServidor);
-                        ejecutar = false;
-                        break;
-
-                    case "3":
-                        out.println("Terminar todo");
-                        mensajeServidor = in.readLine();
-                        System.out.println("Servidor: " + mensajeServidor);
-                        ejecutar = false;
-                        break;
-
-                    default:
-                        System.out.println("Opción no válida.");
-                        break;
+    private static final BufferedReader teclado=new BufferedReader(new InputStreamReader(System.in));
+    private static String leer(String texto) throws IOException {System.out.print(texto);String s=teclado.readLine();if(s==null)throw new EOFException();return s.trim();}
+    private static long numero(String texto) throws IOException {try{long n=Long.parseLong(leer(texto));if(n>0)return n;}catch(NumberFormatException e){}throw new IllegalArgumentException("Ingrese un numero entero positivo.");}
+    private static JSONObject req(String op,long ci){JSONObject r=new JSONObject();r.put("operacion",op);r.put("cedula",ci);return r;}
+    private static JSONObject enviar(PrintWriter out,BufferedReader in,JSONObject req) throws Exception {
+        out.println(req.toJSONString());if(out.checkError())throw new IOException("No se pudo enviar la solicitud.");
+        String line=in.readLine();if(line==null)throw new EOFException("La clinica cerro la conexion.");
+        JSONObject r=(JSONObject)new JSONParser().parse(line);verificar(r);return r;
+    }
+    private static void verificar(JSONObject r){if(!Boolean.TRUE.equals(r.get("ok")))throw new IllegalArgumentException(String.valueOf(r.get("error")));}
+    private static void medicamentos(JSONObject r) {
+        JSONArray a=(JSONArray)r.get("medicamentos");
+        for(Object o:a){JSONObject x=(JSONObject)o;System.out.println("  "+x.get("id")+". "+x.get("medicamento")+" - Gs. "+x.get("precio"));}
+        if(a.isEmpty())System.out.println("No tiene medicamentos pendientes.");
+    }
+    private static void comprobante(JSONObject r){System.out.println("\nCOMPROBANTE ACADEMICO N. "+r.get("id")+" | "+r.get("fecha"));System.out.println(r.get("paciente")+" - CI "+r.get("cedula"));medicamentos(r);System.out.println("TOTAL: Gs. "+r.get("total"));}
+    private static void tcp(String host,long ci,boolean compra) throws Exception {
+        boolean confirmacionEnviada=false;
+        try(Socket s=new Socket()) {
+            s.connect(new InetSocketAddress(host,Integer.getInteger("clinica.tcp.port",4444)),5000);s.setSoTimeout(10000);
+            try(PrintWriter out=new PrintWriter(new OutputStreamWriter(s.getOutputStream(),StandardCharsets.UTF_8),true);
+                BufferedReader in=new BufferedReader(new InputStreamReader(s.getInputStream(),StandardCharsets.UTF_8))) {
+                if(compra) {
+                    JSONObject p=enviar(out,in,req("pendientes_compra",ci));System.out.println("Paciente: "+p.get("paciente"));medicamentos(p);
+                    if(((JSONArray)p.get("medicamentos")).isEmpty())return;
+                    String seleccion=leer("IDs separados por coma (0 para cancelar): ");if("0".equals(seleccion))return;
+                    JSONArray ids=new JSONArray();for(String id:seleccion.split(",",-1)){long n;try{n=Long.parseLong(id.trim());}catch(NumberFormatException e){throw new IllegalArgumentException("Seleccion invalida.");}if(n<=0||ids.contains(n))throw new IllegalArgumentException("IDs invalidos o repetidos.");ids.add(n);}
+                    JSONObject r=req("preparar_compra",ci);r.put("ids",ids);JSONObject resumen=enviar(out,in,r);medicamentos(resumen);System.out.println("TOTAL: Gs. "+resumen.get("total"));
+                    if(!"S".equalsIgnoreCase(leer("Confirmar compra? S/N: "))){System.out.println(enviar(out,in,req("cancelar_compra",ci)).get("mensaje"));return;}
+                    JSONObject confirmar=req("confirmar_compra",ci);confirmar.put("solicitud",resumen.get("solicitud"));confirmacionEnviada=true;
+                    comprobante(enviar(out,in,confirmar));confirmacionEnviada=false;
+                }else {
+                    JSONArray a=(JSONArray)enviar(out,in,req("listar_comprobantes",ci)).get("comprobantes");
+                    if(a.isEmpty()){System.out.println("No tiene comprobantes registrados.");return;}
+                    System.out.println("Comprobantes del mas reciente al mas antiguo:");
+                    for(Object o:a){JSONObject x=(JSONObject)o;System.out.println(x.get("id")+" | "+x.get("fecha")+" | Gs. "+x.get("total"));}
+                    String elegido=leer("Numero de comprobante (0 para volver): ");if("0".equals(elegido))return;
+                    long id;try{id=Long.parseLong(elegido);}catch(NumberFormatException e){throw new IllegalArgumentException("Numero invalido.");}
+                    JSONObject r=req("detalle_comprobante",ci);r.put("id",id);comprobante(enviar(out,in,r));
                 }
             }
-
-        } catch (UnknownHostException e) {
-            System.err.println("Host desconocido: " + host);
-        } catch (IOException e) {
-            System.err.println("Error de I/O en la conexión TCP con la Clínica: " + e.getMessage());
+        }catch(IOException e){if(confirmacionEnviada)System.out.println("No se pudo conocer el resultado. Consulte sus comprobantes antes de repetir la compra.");throw e;}
+    }
+    public static void main(String[] args) {
+        String host=args.length>0?args[0]:"127.0.0.1";
+        while(true) {
+            try {
+                System.out.println("\n=== FARMACIA ===\n1. Consultar recetas pendientes (UDP)\n2. Comprar medicamentos con receta (TCP)\n3. Consultar comprobantes (TCP)\n4. Salir");
+                String op=leer("Seleccione una opcion: ");if("4".equals(op))return;
+                if(!"1".equals(op)&&!"2".equals(op)&&!"3".equals(op)){System.out.println("Opcion invalida.");continue;}
+                long ci=numero("CI del paciente: ");
+                if("1".equals(op)){JSONObject r=UDPClient.consultar(host,ci);verificar(r);System.out.println("Paciente: "+r.get("paciente"));medicamentos(r);}
+                else tcp(host,ci,"2".equals(op));
+            }catch(SocketTimeoutException e){System.out.println("La clinica no respondio dentro del tiempo limite. Puede volver a consultar.");}
+            catch(ConnectException|PortUnreachableException e){System.out.println("No se pudo contactar con la clinica. Verifique que el servidor correspondiente este iniciado.");}
+            catch(EOFException e){if(e.getMessage()==null)return;System.out.println(e.getMessage());}
+            catch(Exception e){System.out.println("No se pudo completar la operacion: "+e.getMessage());}
         }
     }
 }
